@@ -58,6 +58,10 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        // 업데이트·강제 종료 뒤 서비스만 죽어 있는 경우를 복구 (이미 실행 중이면 무시됨)
+        if (prefs.getBoolean("watch_enabled", false)) {
+            startForegroundService(Intent(this, RotationWatchService::class.java))
+        }
         refresh()
     }
 
@@ -86,6 +90,8 @@ class MainActivity : Activity() {
             append("감시: ").append(if (on) "켜짐" else "꺼짐").append('\n')
             append("알림 권한: ").append(if (notif) "OK" else "필요").append('\n')
             append("사용 정보 접근: ").append(if (usage) "OK" else "필요(원인 추적 불가)").append('\n')
+            append("변경 주체 기록(DUMP): ")
+                .append(if (SystemTrace.canReadHistory(this@MainActivity)) "OK" else "없음 (PC에서 adb로 허용)").append('\n')
             append("현재 자동 회전: ").append(if (rot == 1) "켜짐" else "꺼짐")
         }
         toggle.text = if (on) "감시 끄기" else "감시 시작"

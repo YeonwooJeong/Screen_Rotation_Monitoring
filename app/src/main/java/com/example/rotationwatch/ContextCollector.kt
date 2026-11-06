@@ -27,6 +27,7 @@ object ContextCollector {
     private const val ROUTINE_PKG = "com.samsung.android.app.routineplus"
 
     private val SYSTEM_HINTS = mapOf(
+        "android" to "시스템",
         ROUTINE_PKG to "모드 및 루틴",
         "com.samsung.android.bixby.agent" to "빅스비",
         "com.android.systemui" to "시스템UI(퀵패널/회전 버튼)",
@@ -132,12 +133,32 @@ object ContextCollector {
         val routineSeen = perPkg.containsKey(ROUTINE_PKG)
         val sysSeen = perPkg.keys.firstOrNull { it == "com.android.systemui" || it == "com.android.settings" }
 
-        val verdict = when {
+        // 시스템 기록: 누가 설정을 바꿨는지 (adb로 DUMP 권한을 준 경우에만)
+        var changer: String? = null
+        val history = SystemTrace.rotationHistory(ctx)
+        if (history == null) {
+            lines += "변경 주체: 확인 불가 (adb로 DUMP 권한을 주면 기록돼요)"
+        } else {
+            changer = history.lastOrNull { h ->
+                h.newValue == "1" && SystemTrace.toEpoch(h.time)?.let { now - it < 15_000L } == true
+            }?.pkg
+            lines += "설정 변경 기록(최신 4건):"
+            history.takeLast(4).forEach { h ->
+                lines += "  ${h.time.substringAfter(' ')} ${h.oldValue}→${h.newValue} ${label(ctx, h.pkg)}"
+            }
+        }
+
+        val guess = when {
             routineSeen -> "모드 및 루틴이 실행된 흔적이 있어요 (루틴 가능성 높음)"
             !interactive -> "화면이 꺼진 상태에서 켜졌어요 (루틴·예약·백그라운드 앱 의심)"
             sysSeen != null -> "${label(ctx, sysSeen)} 조작 직후예요 (퀵패널/회전 버튼 직접 조작 가능성)"
             foregroundPkg != null -> "${label(ctx, foregroundPkg!!)} 사용 중에 켜졌어요 (앱이 설정을 바꿨거나 회전 제안 버튼)"
             else -> "뚜렷한 원인 흔적이 없어요 (백그라운드 동작 의심)"
+        }
+        val verdict = when (changer) {
+            null -> guess
+            "android" -> "시스템이 직접 바꿨어요 (퀵패널 타일·회전 버튼·삼성 기능 경로) · 추정: $guess"
+            else -> "${label(ctx, changer)} 앱이 직접 바꿨어요 (시스템 기록으로 확인)"
         }
         return Report(now, verdict, lines.joinToString("\n"))
     }
