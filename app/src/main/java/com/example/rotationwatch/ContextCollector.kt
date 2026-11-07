@@ -148,6 +148,22 @@ object ContextCollector {
             }
         }
 
+        // 회전 잠금 기록: 시스템 안에서 어떤 코드가 잠금을 풀었는지 (monkey·회전 버튼·퀵패널 구분)
+        var lockCaller: String? = null
+        val locks = SystemTrace.rotationLockHistory(ctx)
+        if (locks == null) {
+            lines += "회전 잠금 기록: 확인 불가"
+        } else if (locks.isNotEmpty()) {
+            lockCaller = locks.lastOrNull { l ->
+                l.enabled && SystemTrace.toEpoch(l.time)?.let { now - it < 15_000L } == true
+            }?.caller
+            lines += "회전 잠금 기록(최신 4건):"
+            locks.takeLast(4).forEach { l ->
+                val state = if (l.enabled) "켜짐" else "꺼짐"
+                lines += "  ${l.time.substringAfter(' ')} $state ${l.caller}"
+            }
+        }
+
         val guess = when {
             routineSeen -> "모드 및 루틴이 실행된 흔적이 있어요 (루틴 가능성 높음)"
             !interactive -> "화면이 꺼진 상태에서 켜졌어요 (루틴·예약·백그라운드 앱 의심)"
@@ -155,9 +171,12 @@ object ContextCollector {
             foregroundPkg != null -> "${label(ctx, foregroundPkg!!)} 사용 중에 켜졌어요 (앱이 설정을 바꿨거나 회전 제안 버튼)"
             else -> "뚜렷한 원인 흔적이 없어요 (백그라운드 동작 의심)"
         }
-        val verdict = when (changer) {
-            null -> guess
-            "android" -> "시스템이 직접 바꿨어요 (퀵패널 타일·회전 버튼·삼성 기능 경로) · 추정: $guess"
+        val verdict = when {
+            // 회전 잠금 기록에 호출자가 있으면 그게 가장 정확하다
+            lockCaller != null && changer in listOf(null, "android") ->
+                "${SystemTrace.describeCaller(lockCaller)} 때문에 켜졌어요 (호출: ${lockCaller.substringBefore('@')})"
+            changer == null -> guess
+            changer == "android" -> "시스템이 직접 바꿨어요 (퀵패널 타일·회전 버튼·삼성 기능 경로) · 추정: $guess"
             else -> "${label(ctx, changer)} 앱이 직접 바꿨어요 (시스템 기록으로 확인)"
         }
         return Report(now, verdict, lines.joinToString("\n"))
